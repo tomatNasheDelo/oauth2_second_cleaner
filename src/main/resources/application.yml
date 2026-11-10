@@ -1,0 +1,10 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: oauth2-single-app-learning-demo
+
+logging:
+  level:
+    org.springframework.security: INFO

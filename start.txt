@@ -1,0 +1,108 @@
+Подробное руководство: локальный OAuth2 Authorization Server + Client + Resource Server
+=============================================================================================
+
+Цель
+----
+
+Показать роли OAuth2 в одном Spring Boot приложении без Keycloak:
+
+- Authorization Server (issuer) аутентифицирует пользователя и выдаёт signed JWT.
+- OAuth2 Client проходит Authorization Code flow и получает access token.
+- Resource Server проверяет Bearer JWT, issuer/подпись и разрешает защищённый API.
+
+Важно: один процесс нужен только для обучения. Production обычно разделяет роли и использует внешний identity provider, устойчивое хранилище клиентов/consents, ротацию ключей и HTTPS.
+
+Компоненты
+----------
+
+- `AuthorizationServerConfiguration` — Spring Authorization Server endpoints, registered OAuth client, RSA keypair/JWK/JWT decoder, issuer.
+- `ApplicationSecurityConfiguration` — in-memory users alice/bob, form login, OAuth2 Client, JWT Resource Server и правила API.
+- `DemoApiController` — открытый endpoint, JWT-защищённый API, admin endpoint и вывод metadata полученного client access token (без самог�� секрета).
+- `ResourceServerApiTest` — тесты 401 для anonymous и успешного API-вызова с тестовым JWT.
+- `build.gradle.kts` — Java 17, Spring Boot, Authorization Server, OAuth2 Client и Resource Server.
+
+Требования
+----------
+
+- JDK 17+
+- Gradle 8.x
+- Свободный порт 8080
+- Docker не требуется
+
+Запуск
+------
+
+Из корня проекта:
+
+```bash
+gradle bootRun
+```
+
+Используй только `http://127.0.0.1:8080` (не `localhost`), потому что issuer и redirect URI должны совпадать.
+
+Пользователи учебной формы login:
+
+- `alice` / `alice-local-only` — обычный USER.
+- `bob` / `bob-local-only` — USER + ADMIN.
+
+Все они только для localhost demo.
+
+Authorization Server endpoints
+------------------------------
+
+- `GET /.well-known/openid-configuration` — issuer metadata.
+- `GET /oauth2/authorize` — начало authorize request.
+- `POST /oauth2/token` — code-to-token exchange (делает Spring OAuth client).
+- `GET /oauth2/jwks` — публичные JWK для проверки подписи.
+- `GET /login` — форма входа пользователя.
+
+Client flow
+-----------
+
+1. Открой `/oauth2/authorization/local` в браузере.
+2. Введи alice credentials и подтверди запрос, если показан экран consent.
+3. Authorization Server вернёт браузер на `/login/oauth2/code/local`.
+4. OAuth2 Client сохранит authorized client в HTTP session.
+5. После login откроется `/api/client/token-info`: там метаданные токена без его значения.
+
+Для изучения самого Bearer token в локальной среде можно получить его через отладчик/временный локальный тест. Не добавляй token в commit, issue, screenshot или публичный лог. Client token выдаётся Spring OAuth2 Client и не раскрывается этим endpoint.
+
+Resource Server flow
+--------------------
+
+После browser client login получить token значение можно в debugger из `OAuth2AuthorizedClient.getAccessToken().getTokenValue()`, но никогда не включай такое отображение в публичный endpoint. Передай JWT локальному curl (не вставляй его в shell history, если это реальный token):
+
+```bash
+curl -i http://127.0.0.1:8080/api/user/me \
+  -H 'Authorization: Bearer YOUR_LOCAL_ACCESS_TOKEN'
+```
+
+Без Bearer token protected endpoint выдаёт 401. С валидным token issuer/подпись проверяются Resource Server фильтром. Через обычный session login доступ к `/api/user/**` не предоставляется — это endpoint именно для Bearer JWT.
+
+Другие endpoints
+----------------
+
+- `GET /` — подсказки для начала.
+- `GET /api/client/token-info` — информация о token текущей OAuth2 Client сессии, сам JWT не отображается.
+- `GET /api/user/me` — защищено как Resource Server, требует Bearer token.
+- `GET /api/admin/hello` — администраторский endpoint.
+
+Тесты
+-----
+
+```bash
+gradle test
+```
+
+Один тестовый класс:
+
+```bash
+gradle test --tests 'ru.demo.oauth2.ResourceServerApiTest'
+```
+
+Тесты используют mock JWT и не запускают внешний issuer.
+
+Ключи и безопасность
+-------------------
+
+RSA signing key генерируется при старте приложения в памяти. После перезапуска ключ меняется, старые JWT перестают проходить проверку. Это сделано для минимального демо; production требует управляемого постоянного ключа, ротации ключей и безопасного хранения private key. Не используй встроенные пароли/секрет в реальной системе. Всегда проверяй issuer, audience, алгоритм, expiry и permissions согласно требованиям своего API.
